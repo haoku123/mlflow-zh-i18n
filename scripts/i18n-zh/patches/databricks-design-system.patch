@@ -1,0 +1,56 @@
+--- a/node_modules/@databricks/design-system/dist/index.js
++++ b/node_modules/@databricks/design-system/dist/index.js
+@@ -472,7 +472,7 @@
+ 
+ const Alert = ({ componentId, analyticsEvents = [
+     DesignSystemEventProviderAnalyticsEventTypes.OnView
+-], dangerouslySetAntdProps, closable = true, closeIconLabel = 'Close alert', onClose, actions, showMoreContent, showMoreText = 'Show details', showMoreModalTitle = 'Details', forceVerticalActionsPlacement = false, forceHorizontalActionsPlacement = false, collapsible = false, defaultExpanded = true, expandToggleAriaLabel = 'Expand alert details', collapseToggleAriaLabel = 'Collapse alert details', size = 'large', ...props })=>{
++], dangerouslySetAntdProps, closable = true, closeIconLabel = '关闭警报', onClose, actions, showMoreContent, showMoreText = 'Show details', showMoreModalTitle = 'Details', forceVerticalActionsPlacement = false, forceHorizontalActionsPlacement = false, collapsible = false, defaultExpanded = true, expandToggleAriaLabel = 'Expand alert details', collapseToggleAriaLabel = 'Collapse alert details', size = 'large', ...props })=>{
+     const { theme, getPrefixedClassName } = useDesignSystemTheme();
+     const memoizedAnalyticsEvents = useMemo(()=>analyticsEvents, [
+         analyticsEvents
+@@ -9858,7 +9858,7 @@
+         if (ref && ref.current) {
+             const selectDropdown = ref.current.querySelector(`.${classNamePrefix}-select-selection-search-input`);
+             if (selectDropdown) {
+-                selectDropdown.setAttribute('aria-label', pageSizeSelectAriaLabel ?? 'Select page size');
++                selectDropdown.setAttribute('aria-label', pageSizeSelectAriaLabel ?? '选择每页条数');
+             }
+             const pageQuickJumper = ref.current.querySelector(`.${classNamePrefix}-pagination-options-quick-jumper > input`);
+             if (pageQuickJumper) {
+@@ -9892,7 +9892,7 @@
+         })
+     });
+ };
+-const CursorPagination = function CursorPagination({ onNextPage, onPreviousPage, hasNextPage, hasPreviousPage, nextPageText = 'Next', previousPageText = 'Previous', pageSizeSelect: { options: pageSizeOptions, default: defaultPageSize, getOptionText: getPageSizeOptionText, onChange: onPageSizeChange, ariaLabel = 'Select page size' } = {}, componentId = 'design_system.cursor_pagination', analyticsEvents = [
++const CursorPagination = function CursorPagination({ onNextPage, onPreviousPage, hasNextPage, hasPreviousPage, nextPageText = '下一页', previousPageText = '上一页', pageSizeSelect: { options: pageSizeOptions, default: defaultPageSize, getOptionText: getPageSizeOptionText, onChange: onPageSizeChange, ariaLabel = '选择每页条数' } = {}, componentId = 'design_system.cursor_pagination', analyticsEvents = [
+     DesignSystemEventProviderAnalyticsEventTypes.OnValueChange
+ ], valueHasNoPii }) {
+     const { theme, classNamePrefix } = useDesignSystemTheme();
+@@ -9907,7 +9907,7 @@
+         analyticsEvents: memoizedAnalyticsEvents,
+         valueHasNoPii
+     });
+-    const getPageSizeOptionTextDefault = (pageSize)=>`${pageSize} / page`;
++    const getPageSizeOptionTextDefault = (pageSize)=>`${pageSize} 条/页`;
+     return /*#__PURE__*/ jsxs("div", {
+         css: {
+             display: 'flex',
+@@ -12989,7 +12989,7 @@
+         css: tableStyles.resizeHandleContainer,
+         style: style,
+         role: "button",
+-        "aria-label": "Resize Column",
++        "aria-label": "调整列宽",
+         children: /*#__PURE__*/ jsx("div", {
+             css: tableStyles.resizeHandle
+         })
+@@ -13023,7 +13023,7 @@
+                                     marginBottom: 0,
+                                     marginTop: 0
+                                 },
+-                                children: "Resize Column"
++                                children: "调整列宽"
+                             }),
+                             /*#__PURE__*/ jsxs("div", {
+                                 style: {

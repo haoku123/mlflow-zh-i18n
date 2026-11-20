@@ -1,0 +1,337 @@
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import {
+  DialogCombobox,
+  DialogComboboxContent,
+  DialogComboboxOptionList,
+  DialogComboboxOptionListSearch,
+  DialogComboboxOptionListSelectItem,
+  DialogComboboxTrigger,
+  Radio,
+  SimpleSelect,
+  SimpleSelectOption,
+  Typography,
+  useDesignSystemTheme,
+} from '@databricks/design-system';
+import { FieldLabel } from './FieldLabel';
+import { FormattedMessage, useIntl } from '@databricks/i18n';
+import { useResourceOptionsQuery } from '../hooks';
+import { useWorkspacesEnabled } from '../../experiment-tracking/hooks/useServerInfo';
+import {
+  ALL_RESOURCE_PATTERN_LABEL,
+  PERMISSIONS,
+  RESOURCE_TYPES,
+  isWildcardOnlyResourceType,
+  getGrantablePermissions,
+  getResourceTypeLabelIntl,
+} from '../types';
+
+export type RolePermissionScope = 'specific' | 'all';
+
+/**
+ * Internal draft state of a role-permission entry. Distinct from the
+ * canonical ``StagedRolePermission`` (which carries ``resourcePattern``)
+ * because the form needs to track ``scope`` independently of the picked
+ * resource id. ``RolePermissionsSection`` translates this draft into a
+ * ``StagedRolePermission`` on Add.
+ */
+export interface RolePermissionDraft {
+  resourceType: string;
+  scope: RolePermissionScope;
+  /** Chosen resource id when ``scope === 'specific'``; empty for ``'all'``. */
+  resourceId: string;
+  permission: string;
+}
+
+export interface RolePermissionFormProps {
+  value: RolePermissionDraft;
+  onChange: (value: RolePermissionDraft) => void;
+  /** The role's workspace, displayed read-only when ``workspace`` resource type is picked. */
+  workspace?: string;
+  disabled?: boolean;
+  /** Render an inline reminder next to the resource picker. The parent
+   * passes ``true`` when the draft has been touched but isn't fillable
+   * yet (resource type changed but no specific resource picked) so the
+   * admin sees why the discard-confirm dialog is about to ask. */
+  showResourceRequiredError?: boolean;
+}
+
+export const ROLE_PERMISSION_DRAFT_DEFAULT: RolePermissionDraft = {
+  resourceType: RESOURCE_TYPES[0],
+  scope: 'all',
+  resourceId: '',
+  permission: PERMISSIONS[0],
+};
+
+/**
+ * Add a permission to a role. Mirrors ``DirectPermissionForm``'s shape
+ * (resource type + scope radio + resource picker) plus a ``workspace``
+ * special case: the only valid pattern is ``*`` (the role's own
+ * workspace), so the scope radio is hidden and we render a static
+ * "Workspace: <name>" line.
+ */
+export const RolePermissionForm = ({
+  value,
+  onChange,
+  workspace,
+  disabled,
+  showResourceRequiredError = false,
+}: RolePermissionFormProps) => {
+  const { theme } = useDesignSystemTheme();
+  const intl = useIntl();
+  const [resourceSearch, setResourceSearch] = useState('');
+  // Hide ``workspace`` in single-tenant mode where the workspace concept
+  // collapses to the single ``default`` slot.
+  const { workspacesEnabled, loading: workspacesLoading } = useWorkspacesEnabled();
+  const resourceTypes = useMemo(
+    () => (workspacesEnabled || workspacesLoading ? RESOURCE_TYPES : RESOURCE_TYPES.filter((rt) => rt !== 'workspace')),
+    [workspacesEnabled, workspacesLoading],
+  );
+
+  const typeLabel = getResourceTypeLabelIntl(intl, value.resourceType);
+
+  const {
+    options: resourceOptions,
+    isLoading: resourceOptionsLoading,
+    error: resourceOptionsError,
+  } = useResourceOptionsQuery(value.resourceType, workspace);
+
+  const filteredOptions = useMemo(() => {
+    const trimmed = resourceSearch.trim().toLowerCase();
+    if (!trimmed) return resourceOptions;
+    return resourceOptions.filter(
+      (o) => o.name.toLowerCase().includes(trimmed) || o.id.toLowerCase().includes(trimmed),
+    );
+  }, [resourceOptions, resourceSearch]);
+
+  // Wildcard-only types have no per-row grain, so the specific-resource scope is
+  // not offered and the id picker is never reachable for them.
+  const wildcardOnly = isWildcardOnlyResourceType(value.resourceType);
+  const selectedOption = resourceOptions.find((o) => o.id === value.resourceId);
+  const renderOption = (o: { id: string; name: string }) => (o.name === o.id ? o.name : `${o.name} (${o.id})`);
+
+  return (
+    <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}>
+      <div>
+        <FieldLabel>
+          <FormattedMessage defaultMessage="Resource Type" description="Label for the resource type field" />
+        </FieldLabel>
+        <SimpleSelect
+          id="admin-role-permission-form-resource-type"
+          componentId="admin.role_permission_form.resource_type"
+          value={value.resourceType}
+          onChange={({ target }) => {
+            const next = target.value;
+            // Reset scope/resourceId when switching types so a stale
+            // resource id doesn't leak across resource types. Also coerce
+            // ``permission`` into the new type's grantable set — e.g.
+            // ``READ`` is invalid at workspace scope.
+            const nextGrantable = getGrantablePermissions(next);
+            const nextPermission = nextGrantable.includes(value.permission) ? value.permission : nextGrantable[0];
+            onChange({
+              ...value,
+              resourceType: next,
+              scope: 'all',
+              resourceId: '',
+              permission: nextPermission,
+            });
+          }}
+          disabled={disabled}
+        >
+          {resourceTypes.map((rt) => (
+            <SimpleSelectOption key={rt} value={rt}>
+              {getResourceTypeLabelIntl(intl, rt)}
+            </SimpleSelectOption>
+          ))}
+        </SimpleSelect>
+      </div>
+
+      {value.resourceType === 'workspace' ? (
+        <div>
+          <FieldLabel>
+            <FormattedMessage defaultMessage="Workspace" description="Label for the workspace field" />
+          </FieldLabel>
+          <Typography.Text color="secondary">
+            {workspace ?? 'default'}{' '}
+            <Typography.Text color="secondary" size="sm">
+              <FormattedMessage
+                defaultMessage="(this grant applies to the role's workspace)"
+                description="Hint explaining the scope of a workspace grant"
+              />
+            </Typography.Text>
+          </Typography.Text>
+        </div>
+      ) : (
+        <>
+          <div>
+            <FieldLabel>
+              <FormattedMessage defaultMessage="Scope" description="Label for the permission scope field" />
+            </FieldLabel>
+            <Radio.Group
+              componentId="admin.role_permission_form.scope"
+              name="admin-role-permission-form-scope"
+              value={value.scope}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  scope: e.target.value as RolePermissionScope,
+                  resourceId: '',
+                })
+              }
+              layout="vertical"
+            >
+              <Radio value="specific" disabled={wildcardOnly}>
+                {intl.formatMessage(
+                  { defaultMessage: 'Specific {resourceType}', description: 'Scope option for a specific resource' },
+                  { resourceType: typeLabel.toLowerCase() },
+                )}
+              </Radio>
+              <Radio value="all">
+                {intl.formatMessage(
+                  { defaultMessage: 'All {resourceType}s', description: 'Scope option for all resources of a type' },
+                  { resourceType: typeLabel.toLowerCase() },
+                )}
+              </Radio>
+            </Radio.Group>
+            {wildcardOnly && (
+              <Typography.Text color="secondary" size="sm">
+                {intl.formatMessage(
+                  {
+                    defaultMessage:
+                      '{resourceType} grants are workspace-wide — they cannot target one {resourceTypeLower}.',
+                    description: 'Hint explaining wildcard-only resource types',
+                  },
+                  { resourceType: typeLabel, resourceTypeLower: typeLabel.toLowerCase() },
+                )}
+              </Typography.Text>
+            )}
+          </div>
+          {value.scope === 'specific' && (
+            <div>
+              <FieldLabel>{typeLabel}</FieldLabel>
+              {showResourceRequiredError && (
+                <Typography.Text
+                  color="error"
+                  size="sm"
+                  css={{ display: 'block', marginBottom: theme.spacing.xs }}
+                  data-testid="admin.role_permission_form.resource_required_error"
+                >
+                  <FormattedMessage
+                    defaultMessage="Select a specific {resourceType} or switch the scope to <strong>All {resourceType}s</strong> before submitting."
+                    description="Validation hint when a specific resource is required"
+                    values={{
+                      resourceType: typeLabel.toLowerCase(),
+                      strong: (chunks: ReactNode) => <strong>{chunks}</strong>,
+                    }}
+                  />
+                </Typography.Text>
+              )}
+              <DialogCombobox
+                componentId="admin.role_permission_form.resource_id"
+                label={typeLabel}
+                value={value.resourceId ? [value.resourceId] : []}
+              >
+                <DialogComboboxTrigger
+                  withInlineLabel={false}
+                  placeholder={intl.formatMessage(
+                    { defaultMessage: 'Select {resourceType}', description: 'Placeholder for the resource picker' },
+                    { resourceType: typeLabel.toLowerCase() },
+                  )}
+                  renderDisplayedValue={() => (selectedOption ? renderOption(selectedOption) : value.resourceId)}
+                  onClear={() => onChange({ ...value, resourceId: '' })}
+                  width="100%"
+                  disabled={disabled}
+                />
+                <DialogComboboxContent
+                  style={{ zIndex: theme.options.zIndexBase + 100 }}
+                  loading={resourceOptionsLoading}
+                >
+                  {resourceOptionsError && (
+                    <div css={{ padding: theme.spacing.sm, color: theme.colors.textValidationDanger }}>
+                      {intl.formatMessage(
+                        { defaultMessage: 'Failed to load {resourceType}s', description: 'Error loading resources' },
+                        { resourceType: typeLabel.toLowerCase() },
+                      )}
+                    </div>
+                  )}
+                  <DialogComboboxOptionList>
+                    <DialogComboboxOptionListSearch
+                      controlledValue={resourceSearch}
+                      setControlledValue={setResourceSearch}
+                    >
+                      {filteredOptions.length === 0 && !resourceOptionsLoading ? (
+                        <DialogComboboxOptionListSelectItem value="" onChange={() => {}} checked={false} disabled>
+                          {resourceSearch
+                            ? intl.formatMessage({
+                                defaultMessage: 'No matching results',
+                                description: 'Shown when the resource search yields no results',
+                              })
+                            : intl.formatMessage({
+                                defaultMessage: 'No resources found',
+                                description: 'Shown when there are no resources to select',
+                              })}
+                        </DialogComboboxOptionListSelectItem>
+                      ) : (
+                        filteredOptions.map((option) => (
+                          <DialogComboboxOptionListSelectItem
+                            key={option.id}
+                            value={option.id}
+                            onChange={(v) => {
+                              onChange({ ...value, resourceId: v });
+                              setResourceSearch('');
+                            }}
+                            checked={option.id === value.resourceId}
+                          >
+                            {renderOption(option)}
+                          </DialogComboboxOptionListSelectItem>
+                        ))
+                      )}
+                    </DialogComboboxOptionListSearch>
+                  </DialogComboboxOptionList>
+                </DialogComboboxContent>
+              </DialogCombobox>
+            </div>
+          )}
+        </>
+      )}
+
+      <div>
+        <FieldLabel>
+          <FormattedMessage defaultMessage="Permission" description="Label for the permission level field" />
+        </FieldLabel>
+        <SimpleSelect
+          id="admin-role-permission-form-level"
+          componentId="admin.role_permission_form.permission_level"
+          value={value.permission}
+          onChange={({ target }) => onChange({ ...value, permission: target.value })}
+          disabled={disabled}
+        >
+          {getGrantablePermissions(value.resourceType).map((p) => (
+            <SimpleSelectOption key={p} value={p}>
+              {p}
+            </SimpleSelectOption>
+          ))}
+        </SimpleSelect>
+      </div>
+    </div>
+  );
+};
+
+/** True when the draft is ready to be added to the staged list. */
+export const isRolePermissionDraftFillable = (draft: RolePermissionDraft): boolean => {
+  if (draft.resourceType === 'workspace') return true;
+  if (isWildcardOnlyResourceType(draft.resourceType)) return true;
+  return draft.scope === 'all' || (draft.scope === 'specific' && draft.resourceId.trim().length > 0);
+};
+
+/**
+ * Translate a draft into the canonical ``resourcePattern`` (the
+ * user-facing label string — ``"all"`` or a specific id — that the
+ * staged list stores). ``ROLE_PERMISSION_DRAFT_DEFAULT`` returns
+ * ``"all"``.
+ */
+export const draftToResourcePattern = (draft: RolePermissionDraft): string => {
+  if (draft.resourceType === 'workspace') return ALL_RESOURCE_PATTERN_LABEL;
+  if (isWildcardOnlyResourceType(draft.resourceType)) return ALL_RESOURCE_PATTERN_LABEL;
+  return draft.scope === 'all' ? ALL_RESOURCE_PATTERN_LABEL : draft.resourceId.trim();
+};
